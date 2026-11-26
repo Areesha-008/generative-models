@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Downloaded data. UHaT is unzipped into starter/data/uhat/.
+starter/data/uhat/*
+!starter/data/uhat/.gitkeep
+
+# Trained weights stay on Hugging Face or Google Drive, not in git.
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+checkpoints/
+weights/
