@@ -61,7 +61,16 @@ python part_a_mae/pretrain.py         # 100 epochs, then reconstructions
 python part_a_mae/classify.py         # few-label classifier, accuracy, confusion matrix
 python part_b_vae/train.py            # 30 epochs, reconstructions, samples, interpolation
 python part_c_diffusion/train.py      # 40 epochs, forward noising, 40x8 samples, denoising
+python part_c_diffusion/blind_test.py generate   # one shuffled sample per character
 ```
+
+**Blind test (§3.3).** `generate` writes `results/part_c_blind_test.png`, which has 40 numbered images, and one blank sheet per member: `results/blind_member1.csv` and `results/blind_member2.csv`. Each member fills in the `guess` column alone, using names from `results/part_c_blind_test_names.txt`. Don't open `results/part_c_blind_key.csv` until both sheets are done. Then run:
+
+```bash
+python part_c_diffusion/blind_test.py score
+```
+
+This writes the `diffusion_blind` rows of `results/human_eval.csv` and the Table 3 numbers to `results/part_c_blind_test_summary.txt`.
 
 On a GPU the training data is held in GPU memory, and Parts A and C train under bfloat16 autocast. Set `AMP=0` to train in float32. Each script saves its checkpoint after every epoch to `part_x/checkpoints/`, which git ignores. It also writes parameters, final loss and time to `results/part_x_training.txt` for Table 2.
 
