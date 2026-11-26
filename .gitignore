@@ -15,3 +15,6 @@ starter/data/uhat/*
 *.safetensors
 checkpoints/
 weights/
+
+# Part D chunk index (rebuilt by part_d_rag/index.py)
+part_d_rag/index/
