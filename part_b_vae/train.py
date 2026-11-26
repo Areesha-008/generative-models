@@ -6,13 +6,13 @@ Run from the repo root:
     python part_b_vae/train.py
 """
 import sys
+import time
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "starter"))
@@ -31,22 +31,25 @@ RESULTS = ROOT / "results"
 CKPT = Path(__file__).resolve().parent / "checkpoints" / "vae.pt"
 
 
-def run_epoch(model, loader, opt, device):
+def run_epoch(model, data, opt):
+    """One pass over `data` (already on the device). Shuffled when training."""
     training = opt is not None
     model.train(training)
-    totals = torch.zeros(3)
-    count = 0
-    for (batch,) in loader:
-        batch = batch.to(device)
+    totals = torch.zeros(3, device=data.device)
+    if training:
+        order = torch.randperm(len(data), device=data.device)
+    else:
+        order = torch.arange(len(data), device=data.device)
+    for start in range(0, len(data), BATCH_SIZE):
+        batch = data[order[start:start + BATCH_SIZE]]
         logits, mu, logvar = model(batch)
         recon, kl, total = vae_loss(logits, batch, mu, logvar)
         if training:
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=True)
             total.backward()
             opt.step()
-        totals += torch.tensor([recon.item(), kl.item(), total.item()]) * batch.size(0)
-        count += batch.size(0)
-    return (totals / count).tolist()
+        totals += torch.stack([recon, kl, total]).detach() * batch.size(0)
+    return (totals / len(data)).tolist()
 
 
 def reconstructions(model, images, device):
@@ -61,26 +64,32 @@ def reconstructions(model, images, device):
 def main():
     torch.manual_seed(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
     print("device:", device)
 
     train_x, _, names = load_uhat_characters(root=DATA, split="train")
     test_x, test_y, _ = load_uhat_characters(root=DATA, split="test", class_names=names)
-    train_loader = DataLoader(TensorDataset(train_x), batch_size=BATCH_SIZE, shuffle=True)
-    test_loader = DataLoader(TensorDataset(test_x), batch_size=BATCH_SIZE)
+    print("UHaT train", tuple(train_x.shape), "test", tuple(test_x.shape), "classes", len(names))
+    train_gpu = train_x.to(device)
+    test_gpu = test_x.to(device)
 
     model = VAE().to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print("VAE parameters:", n_params)
     opt = torch.optim.Adam(model.parameters(), lr=LR)
 
     RESULTS.mkdir(parents=True, exist_ok=True)
     CKPT.parent.mkdir(parents=True, exist_ok=True)
     log_path = RESULTS / "part_b_loss.csv"
     history = []
+    start = time.time()
     with log_path.open("w", encoding="utf-8") as log:
         log.write("epoch,train_recon,train_kl,train_total,test_recon,test_kl,test_total\n")
         for epoch in range(1, EPOCHS + 1):
-            train_stats = run_epoch(model, train_loader, opt, device)
+            train_stats = run_epoch(model, train_gpu, opt)
             with torch.no_grad():
-                test_stats = run_epoch(model, test_loader, None, device)
+                test_stats = run_epoch(model, test_gpu, None)
             row = [epoch, *train_stats, *test_stats]
             history.append(row)
             log.write(",".join(f"{v:.6f}" if i else str(v) for i, v in enumerate(row)) + "\n")
@@ -91,8 +100,19 @@ def main():
                 f"test {test_stats[2]:.1f}",
                 flush=True,
             )
+            # Save every epoch so a runtime disconnect does not lose the run.
+            torch.save(model.state_dict(), CKPT)
 
-    torch.save(model.state_dict(), CKPT)
+    minutes = (time.time() - start) / 60
+    gpu = torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu"
+    final = history[-1]
+    (RESULTS / "part_b_training.txt").write_text(
+        f"parameters: {n_params}\nfinal_loss: {final[3]:.4f}\n"
+        f"minutes: {minutes:.1f}\ndevice: {gpu}\n"
+        f"test_neg_elbo: {final[6]:.4f}\ntest_recon: {final[4]:.4f}\ntest_kl: {final[5]:.4f}\n",
+        encoding="utf-8",
+    )
+    print(f"test negative ELBO {final[6]:.2f} = recon {final[4]:.2f} + KL {final[5]:.2f} nats")
     print("saved", CKPT)
 
     cols = list(zip(*history))

@@ -4,15 +4,19 @@ AdamW, learning rate 5e-4, weight decay 0.05, batch size 256, 100 epochs.
 Labels are ignored. Run from the repo root:
 
     python part_a_mae/pretrain.py
+
+On a GPU the whole training set sits in GPU memory and the forward pass runs
+in bfloat16 (the loss is computed in float32). Set AMP=0 to train in float32.
 """
+import os
 import sys
+import time
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "starter"))
@@ -31,20 +35,30 @@ RESULTS = ROOT / "results"
 CKPT = Path(__file__).resolve().parent / "checkpoints" / "mae.pt"
 
 
-def epoch_loss(model, loader, opt, device):
+def setup_device():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    use_amp = device.type == "cuda" and os.environ.get("AMP", "1") != "0"
+    return device, use_amp
+
+
+def epoch_loss(model, patches, opt, device, use_amp):
+    """One pass over the data, already on `device`, in a fresh random order."""
     model.train()
     total = 0.0
-    count = 0
-    for (batch,) in loader:
-        batch = batch.to(device)
-        pred, mask = model(batch)
-        loss = masked_mse(pred, batch, mask)
-        opt.zero_grad()
+    order = torch.randperm(len(patches), device=device)
+    for start in range(0, len(patches), BATCH_SIZE):
+        batch = patches[order[start:start + BATCH_SIZE]]
+        with torch.autocast(device.type, dtype=torch.bfloat16, enabled=use_amp):
+            pred, mask = model(batch)
+        loss = masked_mse(pred.float(), batch, mask.float())
+        opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
-        total += loss.item() * batch.shape[0]
-        count += batch.shape[0]
-    return total / count
+        total += loss.detach() * batch.shape[0]
+    return (total / len(patches)).item()
 
 
 def save_reconstructions(model, images, labels, device, path):
@@ -53,7 +67,7 @@ def save_reconstructions(model, images, labels, device, path):
     patches = patchify(images).to(device)
     with torch.no_grad():
         pred, mask = model(patches)
-    pred = pred.cpu()
+    pred = pred.float().cpu()
     mask = mask.cpu()
     patches = patches.cpu()
     hidden = mask.unsqueeze(-1).bool()
@@ -84,29 +98,41 @@ def save_reconstructions(model, images, labels, device, path):
 
 def main():
     torch.manual_seed(SEED)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("device:", device)
+    device, use_amp = setup_device()
+    print("device:", device, "| bf16 autocast:", use_amp)
     images, _ = load_eurosat_split("train")
-    patches = patchify(images).contiguous()
-    loader = DataLoader(TensorDataset(patches), batch_size=BATCH_SIZE, shuffle=True)
+    patches = patchify(images).contiguous().to(device)
+    print("training patches:", tuple(patches.shape))
     model = MaskedAutoencoder().to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print("MAE parameters (encoder + decoder):", n_params)
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 
     RESULTS.mkdir(parents=True, exist_ok=True)
     CKPT.parent.mkdir(parents=True, exist_ok=True)
     log_path = RESULTS / "part_a_pretrain_loss.csv"
+    losses = []
+    start = time.time()
     with log_path.open("w", encoding="utf-8") as log:
         log.write("epoch,loss\n")
         for epoch in range(1, EPOCHS + 1):
-            loss = epoch_loss(model, loader, opt, device)
+            loss = epoch_loss(model, patches, opt, device, use_amp)
+            losses.append(loss)
             log.write(f"{epoch},{loss:.6f}\n")
             log.flush()
-            print(f"epoch {epoch:3d}  loss {loss:.4f}", flush=True)
-
-    torch.save(model.state_dict(), CKPT)
+            # Save every epoch so a runtime disconnect does not lose the run.
+            torch.save(model.state_dict(), CKPT)
+            print(f"epoch {epoch:3d}  loss {loss:.5f}  ({time.time() - start:.0f}s)", flush=True)
+    minutes = (time.time() - start) / 60
+    gpu = torch.cuda.get_device_name(0) if device.type == "cuda" else "cpu"
+    (RESULTS / "part_a_training.txt").write_text(
+        f"parameters: {n_params}\nfinal_loss: {losses[-1]:.6f}\n"
+        f"minutes: {minutes:.1f}\ndevice: {gpu}\n",
+        encoding="utf-8",
+    )
     print("saved", CKPT)
+    del patches
 
-    losses = [float(line.split(",")[1]) for line in log_path.read_text(encoding="utf-8").splitlines()[1:]]
     fig, ax = plt.subplots(figsize=(6, 3.5))
     ax.plot(range(1, len(losses) + 1), losses)
     ax.set_xlabel("epoch")
