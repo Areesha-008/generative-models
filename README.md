@@ -74,6 +74,30 @@ This writes the `diffusion_blind` rows of `results/human_eval.csv` and the Table
 
 On a GPU the training data is held in GPU memory, and Parts A and C train under bfloat16 autocast. Set `AMP=0` to train in float32. Each script saves its checkpoint after every epoch to `part_x/checkpoints/`, which git ignores. It also writes parameters, final loss and time to `results/part_x_training.txt` for Table 2.
 
+## Part D: RAG
+
+Retriever: `sentence-transformers/all-MiniLM-L6-v2`. Generator: `Qwen/Qwen2.5-1.5B-Instruct` in float16. Both are loaded through `transformers` only. From the repo root:
+
+```bash
+python part_d_rag/index.py            # D.1–D.2 chunk (150 words, 30 overlap), embed, save part_d_rag/index/
+python part_d_rag/checks.py           # §3.6 chunk length, unit norms, perfect-retriever metrics
+python part_d_rag/eval_retrieval.py   # D.3–D.4 Hit/Recall@1,5,10, MRR@10, Recall@1..20 plot
+python part_d_rag/eval_generation.py  # D.5–D.6 100 answers, ROUGE-L, citation precision, "I don't know" rate
+python part_d_rag/human_eval.py generate   # 20 answers (fixed seed) for both members to mark
+python part_d_rag/human_eval.py score      # after both sheets are filled in
+```
+
+| File | Content |
+| --- | --- |
+| `part_d_rag/chunking.py` | D.1 word chunks |
+| `part_d_rag/encoder.py` | D.2 MiniLM with attention-masked mean pooling and L2 normalisation |
+| `part_d_rag/index.py` | D.2 builds and loads the chunk index |
+| `part_d_rag/search.py` | D.3 one matrix product per batch of questions; abstract score = best chunk |
+| `part_d_rag/metrics.py` | §3.4–3.5 Hit@k, Recall@k, MRR@10, citations, "I don't know" detection |
+| `part_d_rag/generator.py` | D.5 prompt over the top 5 chunks, chat template, greedy decoding, 256 new tokens |
+
+Outputs in `results/`: `part_d_retrieval.csv` (Table 4), `part_d_recall_at_k.png`, `part_d_data.txt` (Table 1), `rag_answers.jsonl`, `part_d_generation.txt` (Table 5), `part_d_retrieval_failures.md` (E.6), `samples.md` (4.7), and the `rag_*` rows of `human_eval.csv`.
+
 ## Numerical checks
 
 These catch the usual bugs. Each implementation has to satisfy them.
