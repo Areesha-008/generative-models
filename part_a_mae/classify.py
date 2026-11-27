@@ -29,6 +29,7 @@ BATCH = 256
 
 RESULTS = ROOT / "results"
 CKPT = Path(__file__).resolve().parent / "checkpoints" / "mae.pt"
+HEAD_CKPT = CKPT.parent / "classifier_head.pt"  # the trained Linear(192, 10), for the app
 
 
 def confusion(pred, target, n=NUM_CLASSES):
@@ -68,6 +69,9 @@ def main():
             log.write(f"{epoch},{loss.item():.6f},{acc.item():.6f}\n")
             if epoch == 1 or epoch % 20 == 0 or epoch == EPOCHS:
                 print(f"epoch {epoch:3d}  loss {loss.item():.4f}  train acc {acc.item():.3f}", flush=True)
+
+    torch.save(clf.head.state_dict(), HEAD_CKPT)
+    print("saved", HEAD_CKPT)
 
     test_images, test_labels = load_eurosat_split("test")
     test_x = patchify(test_images).contiguous()

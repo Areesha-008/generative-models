@@ -5,3 +5,4 @@ diffusers
 rouge-score
 matplotlib
 pillow
+gradio
