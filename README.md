@@ -47,6 +47,24 @@ Expect:
 
 The two grids are written to `starter/results/`.
 
+## Train Parts A–C
+
+On Colab (A100), open [`notebooks/train_colab.ipynb`](notebooks/train_colab.ipynb) and run it top to bottom. It mounts Drive, clones the repo, downloads UHaT, runs the starter check and the numerical checks, and trains all three models. Checkpoints go to Drive. `results/` is copied to Drive after each part.
+
+To run the same steps by hand, from the repo root:
+
+```bash
+python part_a_mae/model.py            # self-checks
+python part_b_vae/model.py
+python part_c_diffusion/diffusion.py
+python part_a_mae/pretrain.py         # 100 epochs, then reconstructions
+python part_a_mae/classify.py         # few-label classifier, accuracy, confusion matrix
+python part_b_vae/train.py            # 30 epochs, reconstructions, samples, interpolation
+python part_c_diffusion/train.py      # 40 epochs, forward noising, 40x8 samples, denoising
+```
+
+On a GPU the training data is held in GPU memory, and Parts A and C train under bfloat16 autocast. Set `AMP=0` to train in float32. Each script saves its checkpoint after every epoch to `part_x/checkpoints/`, which git ignores. It also writes parameters, final loss and time to `results/part_x_training.txt` for Table 2.
+
 ## Numerical checks
 
 These catch the usual bugs. Each implementation has to satisfy them.
