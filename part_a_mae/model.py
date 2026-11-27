@@ -102,10 +102,9 @@ class MaskedAutoencoder(nn.Module):
 
 
 def masked_mse(pred, target, mask):
-    """Mean squared error on hidden patches only."""
-    err = (pred - target).pow(2)
-    keep = mask.unsqueeze(-1)
-    return (err * keep).sum() / keep.sum()
+    """Mean squared error per pixel value, over the hidden patches only."""
+    per_patch = (pred - target).pow(2).mean(dim=-1)  # (N, 64)
+    return (per_patch * mask).sum() / mask.sum()
 
 
 class LinearClassifier(nn.Module):
@@ -157,6 +156,9 @@ if __name__ == "__main__":
     changed_hidden = target.clone()
     changed_hidden[mask == 1] = torch.rand_like(changed_hidden[mask == 1])
     assert not torch.allclose(loss, masked_mse(pred, changed_hidden, mask))
+    # The loss is a true per-value mean: it equals plain MSE over the hidden patches.
+    hidden = mask.bool()
+    assert torch.allclose(loss, (pred[hidden] - target[hidden]).pow(2).mean())
 
     features = mae.encode_all(patches)
     assert features.shape == (4, NUM_PATCHES, DIM)
