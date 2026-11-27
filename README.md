@@ -98,6 +98,39 @@ python part_d_rag/human_eval.py score      # after both sheets are filled in
 
 Outputs in `results/`: `part_d_retrieval.csv` (Table 4), `part_d_recall_at_k.png`, `part_d_data.txt` (Table 1), `rag_answers.jsonl`, `part_d_generation.txt` (Table 5), `part_d_retrieval_failures.md` (E.6), `samples.md` (4.7), and the `rag_*` rows of `human_eval.csv`.
 
+## App
+
+`app/app.py` is a Gradio app with one tab per part, all running the trained models:
+
+| Tab | What it does |
+| --- | --- |
+| MAE | Pick a EuroSAT test tile (slider or **Random tile**) and a mask seed. Shows the masked input, the reconstruction, the original, and the linear probe's predicted land-cover class with the true one. |
+| VAE | **New random characters** decodes 16 codes from N(0, I). Pick characters A and B and slide w to decode (1 − w)·mu_A + w·mu_B, with the 10-step strip below. |
+| Diffusion | Pick a character and a seed; the DDPM draws 8 new samples with 1000 steps. |
+| RAG | Type a question. Shows the answer with the medical notice beneath it, then the 5 retrieved passages with abstract id and score, cited ones first. |
+
+It needs these files, which git ignores:
+
+| File | Made by |
+| --- | --- |
+| `part_a_mae/checkpoints/mae.pt`, `classifier_head.pt` | `pretrain.py`, `classify.py` |
+| `part_b_vae/checkpoints/vae.pt` | `part_b_vae/train.py` |
+| `part_c_diffusion/checkpoints/unet.pt` | `part_c_diffusion/train.py` |
+| `part_d_rag/index/` | `part_d_rag/index.py` |
+| `starter/data/uhat/` | the UHaT download (character names and test images) |
+
+After a Colab run they are all on Drive under `generative-models-runs/`; copy them to the same paths here, or download the weights from the links above. Then, from the repo root:
+
+```bash
+python app/app.py
+```
+
+Open http://127.0.0.1:7860. Add `--share` for a public link (this is what the last notebook cell does on Colab). Each model loads the first time its tab is used. The app picks `cuda`, then Apple `mps`, then `cpu`; set `APP_DEVICE` to override. On a laptop the diffusion tab takes 15–60 s and a RAG answer 10–30 s.
+
+Screenshots (F.1):
+
+<!-- Add after training: results/app_mae.png, app_vae.png, app_diffusion.png, app_rag.png -->
+
 ## Numerical checks
 
 These catch the usual bugs. Each implementation has to satisfy them.
