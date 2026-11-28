@@ -88,7 +88,8 @@ class MaskedAutoencoder(nn.Module):
     def decode(self, encoded, ids_keep, mask):
         tokens = self.to_decoder(encoded)
         n, dim = tokens.shape[0], tokens.shape[-1]
-        full = self.mask_token.expand(n, NUM_PATCHES, dim).clone()
+        # Under autocast the tokens are bfloat16; scatter needs both sides in one dtype.
+        full = self.mask_token.expand(n, NUM_PATCHES, dim).to(tokens.dtype).clone()
         idx = ids_keep.unsqueeze(-1).expand(-1, -1, dim)
         full = full.scatter(1, idx, tokens)
         full = full + self.decoder_pos_embed
